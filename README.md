@@ -99,7 +99,9 @@ The design is similar to the web-app, but not the exact same since it's hard to 
 
 ## License
 
-MIT
+AGPL-3.0
+
+This project is licensed under the GNU Affero General Public License v3.0. See [LICENSE](LICENSE) for details.
 
 ---
 
