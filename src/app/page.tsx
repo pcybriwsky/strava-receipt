@@ -370,56 +370,6 @@ export default function Home() {
     fetchActivities(nextPage, false);
   };
 
-  const loadAllActivities = async () => {
-    if (!accessToken) return;
-    
-    clearActivitiesCache();
-    setIsLoadingMore(true);
-    
-    let page = 1;
-    let hasMore = true;
-    let allFetchedActivities: StravaActivity[] = [];
-    
-    while (hasMore) {
-      try {
-        const response = await fetch(
-          `${STRAVA_API_BASE}/athlete/activities?per_page=100&page=${page}`,
-          { headers: { Authorization: `Bearer ${accessToken}` } }
-        );
-        
-        if (response.status === 401) {
-          await handleTokenRefresh();
-          break;
-        }
-        
-        if (response.status === 429) {
-          setError('Hey! This application has gotten rate-limited due to its popularity! Please check back in another time.');
-          break;
-        }
-        
-        if (!response.ok) break;
-        
-        const data: StravaActivity[] = await response.json();
-        if (data.length === 0) {
-          hasMore = false;
-        } else {
-          allFetchedActivities = [...allFetchedActivities, ...data];
-          setAllActivities(allFetchedActivities);
-          setTotalActivitiesLoaded(allFetchedActivities.length);
-          page++;
-          hasMore = data.length === 100;
-        }
-      } catch {
-        break;
-      }
-    }
-    
-    setCachedActivities(allFetchedActivities, allFetchedActivities.length);
-    
-    setHasMoreActivities(false);
-    setIsLoadingMore(false);
-  };
-
   const handleTokenRefresh = async () => {
     if (!refreshToken) {
       handleLogout();
@@ -1465,22 +1415,13 @@ export default function Home() {
               </div>
             </div>
             {hasMoreActivities && (
-              <div className="flex gap-2 mb-2">
-                <button
-                  onClick={loadMoreActivities}
-                  disabled={isLoadingMore}
-                  className="flex-1 text-[10px] uppercase tracking-wider py-2 border border-[#DDD] hover:border-[#FC4C02] hover:text-[#FC4C02] disabled:opacity-50"
-                >
-                  {isLoadingMore ? 'LOADING...' : 'LOAD MORE'}
-                </button>
-                <button
-                  onClick={loadAllActivities}
-                  disabled={isLoadingMore}
-                  className="flex-1 text-[10px] uppercase tracking-wider py-2 border border-[#DDD] hover:border-[#FC4C02] hover:text-[#FC4C02] disabled:opacity-50"
-                >
-                  LOAD ALL
-                </button>
-              </div>
+              <button
+                onClick={loadMoreActivities}
+                disabled={isLoadingMore}
+                className="w-full text-[10px] uppercase tracking-wider py-2 border border-[#DDD] hover:border-[#FC4C02] hover:text-[#FC4C02] disabled:opacity-50 mb-2"
+              >
+                {isLoadingMore ? 'LOADING...' : 'LOAD MORE'}
+              </button>
             )}
             <select
               value={filterType}
