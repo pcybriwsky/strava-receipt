@@ -1,0 +1,165 @@
+@import "tailwindcss";
+
+:root {
+  --strava-orange: #FC4C02;
+  --receipt-paper: #FAF9F6;
+  --receipt-text: #1A1A1A;
+  --receipt-text-light: #666666;
+  --receipt-border: #DDDDDD;
+}
+
+/* Force light mode */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: light;
+  }
+}
+
+html {
+  color-scheme: light !important;
+}
+
+body {
+  background-color: #FAF9F6 !important;
+  color: #1A1A1A !important;
+  font-family: 'Monaco', 'Menlo', 'Consolas', 'Courier New', monospace !important;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Scrollbar - minimal */
+::-webkit-scrollbar {
+  width: 4px;
+  height: 4px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #CCC;
+  border-radius: 2px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #AAA;
+}
+
+/* Dashed divider like receipt */
+.receipt-divider {
+  border: none;
+  border-top: 1px dashed #CCC;
+  margin: 12px 0;
+}
+
+/* Receipt shadow */
+.receipt-shadow {
+  box-shadow: 
+    0 1px 2px rgba(0,0,0,0.06),
+    0 2px 4px rgba(0,0,0,0.06),
+    0 4px 8px rgba(0,0,0,0.06);
+}
+
+/* Selection */
+::selection {
+  background: rgba(252, 76, 2, 0.2);
+}
+
+/* Focus states */
+button:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--strava-orange);
+  outline-offset: 2px;
+}
+
+/* Form elements */
+select {
+  cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23666' d='M6 8L2 4h8z'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  padding-right: 28px;
+}
+
+/* Mobile touch improvements */
+@media (hover: none) {
+  button, select, [role="button"] {
+    -webkit-tap-highlight-color: transparent;
+  }
+}
+
+/* Social links */
+.social-link {
+  color: #666;
+  transition: all 0.3s cubic-bezier(0.68, -0.55, 0.265, 1.55);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px;
+  border-radius: 50%;
+  background: transparent;
+}
+
+.social-link:hover {
+  color: #FC4C02;
+  transform: translateY(-4px) scale(1.2) rotate(5deg);
+  background: rgba(252, 76, 2, 0.1);
+  animation: dance 0.5s ease;
+}
+
+.social-link:active {
+  transform: translateY(-2px) scale(1.1) rotate(-5deg);
+}
+
+@keyframes dance {
+  0%, 100% {
+    transform: translateY(-4px) scale(1.2) rotate(5deg);
+  }
+  25% {
+    transform: translateY(-6px) scale(1.25) rotate(-5deg);
+  }
+  50% {
+    transform: translateY(-4px) scale(1.2) rotate(5deg);
+  }
+  75% {
+    transform: translateY(-5px) scale(1.22) rotate(-3deg);
+  }
+}
+
+/* Receipt preview image hover effects */
+.receipt-preview-container {
+  transition: transform 0.3s ease;
+  cursor: pointer;
+}
+
+.receipt-preview-container:hover {
+  transform: translateY(-8px) rotate(-3deg);
+  animation: wiggle 0.6s ease-in-out;
+}
+
+.receipt-preview-container:hover img {
+  filter: drop-shadow(0 12px 24px rgba(0, 0, 0, 0.2));
+}
+
+@keyframes wiggle {
+  0%, 100% { transform: translateY(-8px) rotate(-3deg); }
+  25% { transform: translateY(-10px) rotate(3deg); }
+  50% { transform: translateY(-8px) rotate(-3deg); }
+  75% { transform: translateY(-10px) rotate(3deg); }
+}
+
+/* Print styles */
+@media print {
+  body {
+    background: white !important;
+  }
+  
+  .receipt-shadow {
+    box-shadow: none;
+  }
+  
+  .social-link {
+    display: none;
+  }
+}
