@@ -104,3 +104,9 @@ MIT
 ---
 
 Made by [Pete](https://repete.art)
+
+Connect with me:
+- [Instagram](https://www.instagram.com/_re_pete)
+- [Twitter](https://twitter.com/_re_pete)
+- [Substack](https://substack.com/@repete)
+- [Buy Me a Coffee](https://www.buymeacoffee.com/repete)
