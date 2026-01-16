@@ -12,7 +12,7 @@
  * - Activity data fetching and caching
  * - Receipt-style rendering with GPS routes and photos
  * - Download/share receipt as PNG
- * - Print to thermal printer (button only visible on localhost)
+ * - Print to thermal printer -- button commented out for now, useful for testing print server
  */
 
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
@@ -134,6 +134,7 @@ export default function Home() {
   const [showQRCode, setShowQRCode] = useState<boolean>(true);
   const [showRoute, setShowRoute] = useState<boolean>(true);
   const [showPace, setShowPace] = useState<boolean>(true);
+  const [paceFormat, setPaceFormat] = useState<'pace' | 'speed'>('pace');
   const [showHeartRate, setShowHeartRate] = useState<boolean>(true);
   const [showElevation, setShowElevation] = useState<boolean>(true);
   const [showGear, setShowGear] = useState<boolean>(true);
@@ -142,7 +143,6 @@ export default function Home() {
   const [athleteCopyText, setAthleteCopyText] = useState<string>('ATHLETE COPY');
   const [units, setUnits] = useState<'miles' | 'km'>('miles');
   const [showMoreOptions, setShowMoreOptions] = useState<boolean>(false);
-  const [isLocalhost, setIsLocalhost] = useState<boolean>(false);
 
   useEffect(() => {
     if (selectedActivity) {
@@ -227,8 +227,6 @@ export default function Home() {
 
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      setIsLocalhost(window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-      
       const hash = window.location.hash.substring(1);
       const params = new URLSearchParams(hash);
       
@@ -368,6 +366,56 @@ export default function Home() {
   const loadMoreActivities = () => {
     const nextPage = Math.ceil(totalActivitiesLoaded / 100) + 1;
     fetchActivities(nextPage, false);
+  };
+
+  const loadAllActivities = async () => {
+    if (!accessToken) return;
+    
+    clearActivitiesCache();
+    setIsLoadingMore(true);
+    
+    let page = 1;
+    let hasMore = true;
+    let allFetchedActivities: StravaActivity[] = [];
+    
+    while (hasMore) {
+      try {
+        const response = await fetch(
+          `${STRAVA_API_BASE}/athlete/activities?per_page=100&page=${page}`,
+          { headers: { Authorization: `Bearer ${accessToken}` } }
+        );
+        
+        if (response.status === 401) {
+          await handleTokenRefresh();
+          break;
+        }
+        
+        if (response.status === 429) {
+          setError('Hey! This application has gotten rate-limited due to its popularity! Please check back in another time.');
+          break;
+        }
+        
+        if (!response.ok) break;
+        
+        const data: StravaActivity[] = await response.json();
+        if (data.length === 0) {
+          hasMore = false;
+        } else {
+          allFetchedActivities = [...allFetchedActivities, ...data];
+          setAllActivities(allFetchedActivities);
+          setTotalActivitiesLoaded(allFetchedActivities.length);
+          page++;
+          hasMore = data.length === 100;
+        }
+      } catch {
+        break;
+      }
+    }
+    
+    setCachedActivities(allFetchedActivities, allFetchedActivities.length);
+    
+    setHasMoreActivities(false);
+    setIsLoadingMore(false);
   };
 
   const handleTokenRefresh = async () => {
@@ -1239,6 +1287,17 @@ export default function Home() {
 
   const getStravaUrl = (activityId: number) => `https://www.strava.com/activities/${activityId}`;
 
+  // Calculate speed in mph or kph
+  const calculateSpeed = (distanceMeters: number, timeSeconds: number, unit: 'miles' | 'km'): string => {
+    if (timeSeconds === 0 || distanceMeters === 0) return '0.0';
+    const hours = timeSeconds / 3600;
+    const distance = unit === 'miles' 
+      ? distanceMeters / 1609.344 
+      : distanceMeters / 1000;
+    const speed = distance / hours;
+    return speed.toFixed(1);
+  };
+
   // Auth screen
   if (!accessToken) {
   return (
@@ -1415,13 +1474,22 @@ export default function Home() {
               </div>
             </div>
             {hasMoreActivities && (
-              <button
-                onClick={loadMoreActivities}
-                disabled={isLoadingMore}
-                className="w-full text-[10px] uppercase tracking-wider py-2 border border-[#DDD] hover:border-[#FC4C02] hover:text-[#FC4C02] disabled:opacity-50 mb-2"
-              >
-                {isLoadingMore ? 'LOADING...' : 'LOAD MORE'}
-              </button>
+              <div className="flex gap-2 mb-2">
+                <button
+                  onClick={loadMoreActivities}
+                  disabled={isLoadingMore}
+                  className="flex-1 text-[10px] uppercase tracking-wider py-2 border border-[#DDD] hover:border-[#FC4C02] hover:text-[#FC4C02] disabled:opacity-50"
+                >
+                  {isLoadingMore ? 'LOADING...' : 'LOAD MORE'}
+                </button>
+                <button
+                  onClick={loadAllActivities}
+                  disabled={isLoadingMore}
+                  className="flex-1 text-[10px] uppercase tracking-wider py-2 border border-[#DDD] hover:border-[#FC4C02] hover:text-[#FC4C02] disabled:opacity-50"
+                >
+                  LOAD ALL
+                </button>
+              </div>
             )}
             <select
               value={filterType}
@@ -1569,7 +1637,9 @@ export default function Home() {
                     {/* Indented stats like physical receipt */}
                     <div className="pl-3 mt-1 space-y-0.5 text-[10px] uppercase tracking-wider text-[#666]">
                       {showPace && (
-                        <div>PACE: {calculatePace(selectedActivity.distance, selectedActivity.moving_time || selectedActivity.elapsed_time, units).toUpperCase()} /{units === 'miles' ? 'MI' : 'KM'}</div>
+                        paceFormat === 'pace' 
+                          ? <div>PACE: {calculatePace(selectedActivity.distance, selectedActivity.moving_time || selectedActivity.elapsed_time, units).toUpperCase()} /{units === 'miles' ? 'MI' : 'KM'}</div>
+                          : <div>SPEED: {calculateSpeed(selectedActivity.distance, selectedActivity.moving_time || selectedActivity.elapsed_time, units)} {units === 'miles' ? 'MPH' : 'KPH'}</div>
                       )}
                       {showHeartRate && selectedActivity.average_heartrate && (
                         <div>AVG HEART RATE: {Math.round(selectedActivity.average_heartrate)} BPM</div>
@@ -1836,15 +1906,27 @@ export default function Home() {
 
                   {/* Stats Toggles */}
                   <div className="border-t border-[#DDD] pt-2 space-y-1.5">
-                    <label className="flex items-center justify-between cursor-pointer text-[10px] uppercase tracking-wider text-[#666]">
-                      <span>PACE</span>
-                      <input
-                        type="checkbox"
-                        checked={showPace}
-                        onChange={(e) => setShowPace(e.target.checked)}
-                        className="w-3 h-3 cursor-pointer"
-                      />
-                    </label>
+                    <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-[#666]">
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={showPace}
+                          onChange={(e) => setShowPace(e.target.checked)}
+                          className="w-3 h-3 cursor-pointer"
+                        />
+                        <span>PACE/SPEED</span>
+                      </label>
+                      {showPace && (
+                        <select
+                          value={paceFormat}
+                          onChange={(e) => setPaceFormat(e.target.value as 'pace' | 'speed')}
+                          className="text-[10px] px-2 py-1 border border-[#DDD] bg-white uppercase tracking-wider cursor-pointer"
+                        >
+                          <option value="pace">{units === 'miles' ? 'MIN/MI' : 'MIN/KM'}</option>
+                          <option value="speed">{units === 'miles' ? 'MPH' : 'KPH'}</option>
+                        </select>
+                      )}
+                    </div>
                     <label className="flex items-center justify-between cursor-pointer text-[10px] uppercase tracking-wider text-[#666]">
                       <span>HEART RATE</span>
                       <input
@@ -1969,15 +2051,15 @@ export default function Home() {
                   </button>
                 </div>
 
-                {isLocalhost && (
-                  <button 
-                    onClick={handlePrint}
-                    disabled={isPrinting || !selectedActivity}
-                    className="w-full bg-[#666] hover:bg-[#777] text-white text-[10px] font-bold py-3 uppercase tracking-widest transition disabled:opacity-50"
-                  >
-                    {isPrinting ? 'PRINTING...' : 'PRINT RECEIPT'}
-                  </button>
-                )}
+                {/* Print Button - Commented out for now, useful for testing print server */}
+
+                {/* <button 
+                  onClick={handlePrint}
+                  disabled={isPrinting || !selectedActivity}
+                  className="w-full bg-[#666] hover:bg-[#777] text-white text-[10px] font-bold py-3 uppercase tracking-widest transition disabled:opacity-50"
+                >
+                  {isPrinting ? 'PRINTING...' : 'PRINT RECEIPT'}
+                </button> */}
               </div>
 
               {/* Social Links - Below receipt */}

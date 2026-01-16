@@ -1,35 +1,3 @@
-/**
- * Strava Receipt Print Server
- * 
- * HTTP server that receives Strava activity data and formats it for thermal printing.
- * Formats receipt-style summaries using ESC/POS commands and sends them to a thermal printer.
- * 
- * Printer: EPSON TM-T20III (80mm thermal printer)
- * Connection: USB
- * 
- * The server listens on port 3001 and receives POST requests with activity data:
- * - Activity details (name, type, distance, stats, etc.)
- * - GPS route data (optional)
- * - Activity photos (optional)
- * 
- * Features:
- * - Receipt-style formatting with ESC/POS commands
- * - GPS route visualization (converts coordinates to thermal-printable raster)
- * - Activity photo printing (converts images to 1-bit raster)
- * - Logo printing (Strava logo at top)
- * - QR code generation for activity links
- * - Slow print mode for authentic receipt feel
- * 
- * Dependencies (optional):
- * - jimp: For image processing (logo, photos)
- * - sharp: For GPS route SVG to PNG conversion
- * 
- * Usage:
- *   npm run print-server
- *   or
- *   node print-server.js
- */
-
 const { exec } = require('child_process');
 const fs = require('fs');
 const path = require('path');

@@ -6,8 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "print-server": "node print-server.js"
+    "lint": "eslint"
   },
   "dependencies": {
     "html-to-image": "^1.11.13",
