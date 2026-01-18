@@ -30,6 +30,7 @@ import {
   formatDateLong,
   activitySupportsGPS,
   reverseGeocode,
+  decodePolyline,
   STRAVA_API_BASE
 } from '@/lib/strava';
 
@@ -162,6 +163,13 @@ export default function Home() {
   }, [selectedActivity]);
   const [showSupportModal, setShowSupportModal] = useState<boolean>(false);
   const [hasShownSupportModal, setHasShownSupportModal] = useState<boolean>(false);
+  
+  // Summary view state
+  const [viewMode, setViewMode] = useState<'single' | 'summary'>('single');
+  const [summaryPeriod, setSummaryPeriod] = useState<'week' | 'month' | '3month' | 'ytd' | '12month' | 'alltime' | 'custom'>('week');
+  const [summaryCategory, setSummaryCategory] = useState<'distance' | 'time'>('distance');
+  const [customStartDate, setCustomStartDate] = useState<string>('');
+  const [customEndDate, setCustomEndDate] = useState<string>('');
   
   const [currentPage, setCurrentPage] = useState(1);
   const [filterType, setFilterType] = useState<string>('All');
@@ -1298,6 +1306,221 @@ export default function Home() {
     return speed.toFixed(1);
   };
 
+  // ============================================
+  // SUMMARY VIEW HELPER FUNCTIONS
+  // ============================================
+
+  // Activity types that have meaningful distance
+  const DISTANCE_ACTIVITY_TYPES = ['Run', 'Ride', 'Walk', 'Hike', 'Swim', 'VirtualRide', 'VirtualRun', 'TrailRun', 'MountainBikeRide', 'GravelRide', 'EBikeRide', 'Rowing', 'Kayaking', 'Canoeing', 'StandUpPaddling', 'Surfing', 'Windsurf', 'Kitesurf', 'Ski', 'Snowboard', 'NordicSki', 'BackcountrySki', 'IceSkate', 'InlineSkate', 'Skateboard', 'RollerSki'];
+
+  // Get date range based on selected period
+  const getDateRange = useCallback((): { start: Date; end: Date } => {
+    const now = new Date();
+    const end = new Date(now);
+    end.setHours(23, 59, 59, 999);
+    
+    let start: Date;
+    
+    switch (summaryPeriod) {
+      case 'week':
+        start = new Date(now);
+        start.setDate(start.getDate() - 7);
+        break;
+      case 'month':
+        start = new Date(now);
+        start.setDate(start.getDate() - 30);
+        break;
+      case '3month':
+        start = new Date(now);
+        start.setDate(start.getDate() - 90);
+        break;
+      case 'ytd':
+        start = new Date(now.getFullYear(), 0, 1);
+        break;
+      case '12month':
+        start = new Date(now);
+        start.setFullYear(start.getFullYear() - 1);
+        break;
+      case 'alltime':
+        start = new Date(2000, 0, 1); // Far enough back
+        break;
+      case 'custom':
+        start = customStartDate ? new Date(customStartDate) : new Date(now);
+        if (customEndDate) {
+          end.setTime(new Date(customEndDate).getTime());
+          end.setHours(23, 59, 59, 999);
+        }
+        break;
+      default:
+        start = new Date(now);
+        start.setDate(start.getDate() - 7);
+    }
+    
+    start.setHours(0, 0, 0, 0);
+    return { start, end };
+  }, [summaryPeriod, customStartDate, customEndDate]);
+
+  // Format date range for display
+  const formatDateRange = useCallback((): string => {
+    const { start, end } = getDateRange();
+    const formatDate = (d: Date) => d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }).toUpperCase();
+    return `${formatDate(start)} - ${formatDate(end)}`;
+  }, [getDateRange]);
+
+  // Filter activities by date range and category
+  const getFilteredSummaryActivities = useCallback((): StravaActivity[] => {
+    const { start, end } = getDateRange();
+    
+    return allActivities.filter(activity => {
+      const activityDate = new Date(activity.start_date);
+      const inDateRange = activityDate >= start && activityDate <= end;
+      
+      if (!inDateRange) return false;
+      
+      if (summaryCategory === 'distance') {
+        return DISTANCE_ACTIVITY_TYPES.includes(activity.type) && activity.distance > 0;
+      } else {
+        // Time category shows all activities
+        return true;
+      }
+    });
+  }, [allActivities, getDateRange, summaryCategory]);
+
+  // Aggregate activities by type
+  interface AggregatedActivity {
+    type: string;
+    count: number;
+    totalDistance: number;
+    totalTime: number;
+  }
+
+  const getAggregatedActivities = useCallback((): AggregatedActivity[] => {
+    const filtered = getFilteredSummaryActivities();
+    const aggregated = new Map<string, AggregatedActivity>();
+    
+    filtered.forEach(activity => {
+      const existing = aggregated.get(activity.type);
+      if (existing) {
+        existing.count++;
+        existing.totalDistance += activity.distance || 0;
+        existing.totalTime += activity.elapsed_time || 0;
+      } else {
+        aggregated.set(activity.type, {
+          type: activity.type,
+          count: 1,
+          totalDistance: activity.distance || 0,
+          totalTime: activity.elapsed_time || 0
+        });
+      }
+    });
+    
+    // Sort by count descending
+    return Array.from(aggregated.values()).sort((a, b) => b.count - a.count);
+  }, [getFilteredSummaryActivities]);
+
+  // Get totals across all filtered activities
+  const getSummaryTotals = useCallback((): { totalDistance: number; totalTime: number; activityCount: number } => {
+    const filtered = getFilteredSummaryActivities();
+    return {
+      totalDistance: filtered.reduce((sum, a) => sum + (a.distance || 0), 0),
+      totalTime: filtered.reduce((sum, a) => sum + (a.elapsed_time || 0), 0),
+      activityCount: filtered.length
+    };
+  }, [getFilteredSummaryActivities]);
+
+  // Format total duration for summary (e.g., "12H 30M")
+  const formatTotalDuration = (seconds: number): string => {
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    if (hours > 0) {
+      return `${hours}H ${minutes}M`;
+    }
+    return `${minutes}M`;
+  };
+
+  // Decode routes from activity polylines (no API calls needed!)
+  const summaryRoutes = useMemo((): RoutePoint[][] => {
+    if (viewMode !== 'summary') return [];
+    
+    const filtered = getFilteredSummaryActivities();
+    const routes: RoutePoint[][] = [];
+    
+    for (const activity of filtered) {
+      // Use the summary_polyline from the activity's map data
+      if (activity.map?.summary_polyline) {
+        try {
+          const decoded = decodePolyline(activity.map.summary_polyline);
+          if (decoded.length > 1) {
+            routes.push(decoded);
+          }
+        } catch (err) {
+          console.warn('Failed to decode polyline for activity:', activity.id, err);
+        }
+      }
+    }
+    
+    return routes;
+  }, [viewMode, getFilteredSummaryActivities]);
+
+  // Render overlaid routes SVG (normalized to same bounding box)
+  const renderOverlaidRoutes = useCallback(() => {
+    if (!summaryRoutes || summaryRoutes.length === 0) return null;
+    
+    const width = 280, height = 200;
+    
+    // Normalize each route to the same bounding box
+    const normalizedPaths = summaryRoutes.map((route, routeIndex) => {
+      if (route.length < 2) return null;
+      
+      // Find bounds for this route
+      let minLat = route[0].lat, maxLat = route[0].lat;
+      let minLng = route[0].lng, maxLng = route[0].lng;
+      
+      route.forEach(p => {
+        minLat = Math.min(minLat, p.lat);
+        maxLat = Math.max(maxLat, p.lat);
+        minLng = Math.min(minLng, p.lng);
+        maxLng = Math.max(maxLng, p.lng);
+      });
+      
+      // Add padding
+      const latRange = maxLat - minLat || 0.001;
+      const lngRange = maxLng - minLng || 0.001;
+      const padding = Math.max(latRange, lngRange) * 0.1;
+      minLat -= padding; maxLat += padding;
+      minLng -= padding; maxLng += padding;
+      
+      // Normalize to SVG coordinates
+      const pathData = route.map((p, i) => {
+        const x = ((p.lng - minLng) / (maxLng - minLng)) * width;
+        const y = height - ((p.lat - minLat) / (maxLat - minLat)) * height;
+        return `${i === 0 ? 'M' : 'L'} ${x} ${y}`;
+      }).join(' ');
+      
+      return (
+        <path 
+          key={routeIndex}
+          d={pathData} 
+          stroke="#1A1A1A" 
+          strokeWidth="0.8" 
+          fill="none" 
+          strokeLinecap="round" 
+          strokeLinejoin="round"
+          opacity={0.4}
+        />
+      );
+    });
+    
+    return (
+      <svg viewBox={`0 0 ${width} ${height}`} className="w-full" style={{ maxHeight: '200px' }}>
+        {normalizedPaths}
+      </svg>
+    );
+  }, [summaryRoutes]);
+
+  // Get Strava profile URL
+  const getStravaProfileUrl = () => 'https://www.strava.com/athletes/63762822';
+
   // Auth screen
   if (!accessToken) {
   return (
@@ -1576,12 +1799,332 @@ export default function Home() {
 
         {/* Main Content - Receipt Preview */}
         <main className="flex-1 p-4 lg:p-8 flex flex-col items-center lg:overflow-hidden">
+          {/* View Mode Toggle */}
+          <div className="w-[320px] mb-4 flex border border-[#DDD] bg-white">
+            <button
+              onClick={() => setViewMode('single')}
+              className={`flex-1 py-2 text-[10px] uppercase tracking-wider font-bold transition ${
+                viewMode === 'single' 
+                  ? 'bg-[#1A1A1A] text-white' 
+                  : 'text-[#666] hover:text-[#FC4C02]'
+              }`}
+            >
+              SINGLE
+            </button>
+            <button
+              onClick={() => setViewMode('summary')}
+              className={`flex-1 py-2 text-[10px] uppercase tracking-wider font-bold transition ${
+                viewMode === 'summary' 
+                  ? 'bg-[#1A1A1A] text-white' 
+                  : 'text-[#666] hover:text-[#FC4C02]'
+              }`}
+            >
+              SUMMARY
+            </button>
+          </div>
+
           {error && (
             <div className="w-[320px] mb-4 p-4 bg-red-50 border border-red-200 rounded">
               <p className="text-red-600 text-xs uppercase tracking-wider text-center">{error}</p>
             </div>
           )}
-          {selectedActivity ? (
+
+          {/* Summary View */}
+          {viewMode === 'summary' ? (
+            <>
+              {/* Summary Options */}
+              <div className="w-[320px] mb-4 space-y-2">
+                {/* Time Period Selector */}
+                <select
+                  value={summaryPeriod}
+                  onChange={(e) => setSummaryPeriod(e.target.value as typeof summaryPeriod)}
+                  className="w-full text-xs p-2 border border-[#DDD] bg-white uppercase tracking-wider"
+                >
+                  <option value="week">LAST 7 DAYS</option>
+                  <option value="month">LAST 30 DAYS</option>
+                  <option value="3month">LAST 3 MONTHS</option>
+                  <option value="ytd">YEAR TO DATE</option>
+                  <option value="12month">LAST 12 MONTHS</option>
+                  <option value="alltime">ALL TIME</option>
+                  <option value="custom">CUSTOM RANGE</option>
+                </select>
+
+                {/* Custom Date Range */}
+                {summaryPeriod === 'custom' && (
+                  <div className="flex gap-2">
+                    <input
+                      type="date"
+                      value={customStartDate}
+                      onChange={(e) => setCustomStartDate(e.target.value)}
+                      className="flex-1 text-xs p-2 border border-[#DDD] bg-white uppercase tracking-wider"
+                    />
+                    <input
+                      type="date"
+                      value={customEndDate}
+                      onChange={(e) => setCustomEndDate(e.target.value)}
+                      className="flex-1 text-xs p-2 border border-[#DDD] bg-white uppercase tracking-wider"
+                    />
+                  </div>
+                )}
+
+                {/* Category Toggle */}
+                <div className="flex border border-[#DDD] bg-white">
+                  <button
+                    onClick={() => setSummaryCategory('distance')}
+                    className={`flex-1 py-2 text-[10px] uppercase tracking-wider transition ${
+                      summaryCategory === 'distance' 
+                        ? 'bg-[#FC4C02] text-white font-bold' 
+                        : 'text-[#666] hover:text-[#FC4C02]'
+                    }`}
+                  >
+                    DISTANCE
+                  </button>
+                  <button
+                    onClick={() => setSummaryCategory('time')}
+                    className={`flex-1 py-2 text-[10px] uppercase tracking-wider transition ${
+                      summaryCategory === 'time' 
+                        ? 'bg-[#FC4C02] text-white font-bold' 
+                        : 'text-[#666] hover:text-[#FC4C02]'
+                    }`}
+                  >
+                    ALL ACTIVITIES
+                  </button>
+                </div>
+              </div>
+
+              {/* Summary Receipt */}
+              <div 
+                ref={receiptRef}
+                className="w-[320px] receipt-shadow"
+                style={{ 
+                  background: '#FAF9F6',
+                  fontFamily: "'Monaco', 'Menlo', 'Consolas', monospace"
+                }}
+              >
+                <div className="p-6">
+                  {/* Header */}
+                  <div className="text-center mb-4">
+                    <img
+                      src="/Strava_Logo.svg.png" 
+                      alt="STRAVA" 
+                      width={120} 
+                      height={30} 
+                      className="mx-auto mb-3"
+                      style={{ filter: 'grayscale(100%)' }}
+                    />
+                    <div className="text-sm font-bold uppercase tracking-wider">
+                      ACTIVITY SUMMARY
+                    </div>
+                    <div className="text-[10px] text-[#666] mt-1 uppercase tracking-wider">
+                      {formatDateRange()}
+                    </div>
+                  </div>
+
+                  <hr className="receipt-divider" />
+
+                  {/* Aggregated Activities */}
+                  {getAggregatedActivities().length > 0 ? (
+                    <>
+                      <div className="flex justify-between text-[10px] uppercase tracking-wider text-[#666] mb-2">
+                        <span>ACTIVITY</span>
+                        <span>{summaryCategory === 'distance' ? (units === 'miles' ? 'MILES' : 'KM') : 'TIME'}</span>
+                      </div>
+
+                      <div className="space-y-3 mb-3">
+                        {getAggregatedActivities().map((agg, idx) => (
+                          <div key={idx}>
+                            <div className="flex justify-between text-xs uppercase tracking-wider">
+                              <span>{agg.count} {agg.type.toUpperCase()}{agg.count > 1 ? 'S' : ''}</span>
+                              <span>
+                                {summaryCategory === 'distance' && agg.totalDistance > 0
+                                  ? formatDistance(agg.totalDistance, units).toFixed(2)
+                                  : formatTotalDuration(agg.totalTime)
+                                }
+                              </span>
+                            </div>
+                            {summaryCategory === 'distance' && agg.totalDistance > 0 && (
+                              <div className="pl-3 text-[10px] uppercase tracking-wider text-[#666]">
+                                TOTAL TIME: {formatTotalDuration(agg.totalTime)}
+                              </div>
+                            )}
+                          </div>
+                        ))}
+                      </div>
+
+                      <hr className="receipt-divider" />
+
+                      {/* Totals */}
+                      <div className="mb-3">
+                        {summaryCategory === 'distance' && (
+                          <div className="flex justify-between text-xs font-bold uppercase tracking-wider mb-1">
+                            <span>TOTAL {units === 'miles' ? 'MILES' : 'KM'}</span>
+                            <span>{formatDistance(getSummaryTotals().totalDistance, units).toFixed(2)}</span>
+                          </div>
+                        )}
+                        {summaryCategory === 'time' && (
+                          <div className="flex justify-between text-xs font-bold uppercase tracking-wider mb-1">
+                            <span>TOTAL TIME</span>
+                            <span>{formatTotalDuration(getSummaryTotals().totalTime)}</span>
+                          </div>
+                        )}
+                        <div className="text-[10px] text-[#999] text-right uppercase tracking-wider">
+                          {summaryCategory === 'distance' && (
+                            <span>{formatTotalDuration(getSummaryTotals().totalTime)} · </span>
+                          )}
+                          {getSummaryTotals().activityCount} ACTIVITIES
+                        </div>
+                      </div>
+
+                      {/* Route Overlay */}
+                      {showRoute && summaryRoutes.length > 0 && (
+                        <>
+                          <hr className="receipt-divider" />
+                          <div className="text-center text-[10px] uppercase tracking-wider mb-2 text-[#666]">
+                            ROUTE SIGNATURES ({summaryRoutes.length})
+                          </div>
+                          <div className="mb-3 flex justify-center">
+                            {renderOverlaidRoutes()}
+                          </div>
+                        </>
+                      )}
+                    </>
+                  ) : (
+                    <div className="text-center text-[10px] uppercase tracking-wider text-[#999] py-6">
+                      NO ACTIVITIES IN THIS PERIOD
+                    </div>
+                  )}
+
+                  <hr className="receipt-divider" />
+
+                  {/* Suggested Gratuity */}
+                  <div className="mb-3">
+                    <div className="text-[10px] font-bold uppercase tracking-wider mb-2 text-center">SUGGESTED GRATUITY</div>
+                    <div className="text-[10px] text-[#666] uppercase tracking-wider space-y-0.5" style={{ paddingLeft: '15%' }}>
+                      <div>[ ] GIVE SOME KUDOS</div>
+                      <div>[ ] SHARE WITH A FRIEND</div>
+                      <div>[ ] FOLLOW & TAG @_RE_PETE</div>
+                    </div>
+                  </div>
+
+                  <hr className="receipt-divider" />
+
+                  {/* QR Code - Links to profile */}
+                  {showQRCode && (
+                    <>
+                      <div className="text-center mb-3">
+                        <div className="text-[10px] uppercase tracking-wider mb-2 text-[#666]">VIEW PROFILE ON STRAVA</div>
+                        <div className="flex justify-center">
+                          <QRCodeSVG 
+                            value={getStravaProfileUrl()} 
+                            size={80}
+                            level="L"
+                            bgColor="#FAF9F6"
+                            fgColor="#1A1A1A"
+                          />
+                        </div>
+                      </div>
+                      <hr className="receipt-divider" />
+                    </>
+                  )}
+
+                  {/* Footer */}
+                  <div className="text-center text-[10px] text-[#666] uppercase tracking-wider space-y-1">
+                    <div>&lt;&lt; {athleteCopyText.toUpperCase()} &gt;&gt;</div>
+                    <div className="text-[#999] mt-2">CLAIM YOURS AT RECEIPTS.REPETE.ART</div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Summary Options Below Receipt */}
+              <div className="mt-4 w-[320px]">
+                <label className="flex items-center justify-between cursor-pointer text-[10px] uppercase tracking-wider text-[#666] py-1">
+                  <span>SHOW ROUTES</span>
+                  <input
+                    type="checkbox"
+                    checked={showRoute}
+                    onChange={(e) => setShowRoute(e.target.checked)}
+                    className="w-3 h-3 cursor-pointer"
+                  />
+                </label>
+                <label className="flex items-center justify-between cursor-pointer text-[10px] uppercase tracking-wider text-[#666] py-1">
+                  <span>QR CODE</span>
+                  <input
+                    type="checkbox"
+                    checked={showQRCode}
+                    onChange={(e) => setShowQRCode(e.target.checked)}
+                    className="w-3 h-3 cursor-pointer"
+                  />
+                </label>
+                <div className="flex items-center justify-between py-1">
+                  <span className="text-[10px] uppercase tracking-wider text-[#666]">UNITS</span>
+                  <select
+                    value={units}
+                    onChange={(e) => setUnits(e.target.value as 'miles' | 'km')}
+                    className="text-[10px] px-2 py-1 border border-[#DDD] bg-white uppercase tracking-wider cursor-pointer"
+                  >
+                    <option value="miles">MILES</option>
+                    <option value="km">KILOMETERS</option>
+                  </select>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="flex flex-col gap-2 mt-4 w-[320px]">
+                <div className="flex gap-2">
+                  <button 
+                    onClick={handleDownload}
+                    disabled={isDownloading || getAggregatedActivities().length === 0}
+                    className="flex-1 bg-[#FC4C02] hover:bg-[#E34402] text-white text-[10px] font-bold py-3 uppercase tracking-widest transition disabled:opacity-50"
+                  >
+                    {isDownloading ? (imageLoadingProgress || 'PROCESSING...') : 'DOWNLOAD'}
+                  </button>
+                  <button 
+                    onClick={handleShare}
+                    disabled={isDownloading || getAggregatedActivities().length === 0}
+                    className="flex-1 bg-[#1A1A1A] hover:bg-[#333] text-white text-[10px] font-bold py-3 uppercase tracking-widest transition disabled:opacity-50"
+                  >
+                    {isDownloading ? (imageLoadingProgress || 'PROCESSING...') : 'SHARE / SAVE'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Social Links */}
+              <div className="flex items-center justify-center gap-4 mt-4">
+                <a href="https://www.instagram.com/_re_pete" target="_blank" rel="noopener noreferrer" className="social-link" title="Instagram">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M12 2.163c3.204 0 3.584.012 4.85.07 3.252.148 4.771 1.691 4.919 4.919.058 1.265.069 1.645.069 4.849 0 3.205-.012 3.584-.069 4.849-.149 3.225-1.664 4.771-4.919 4.919-1.266.058-1.644.07-4.85.07-3.204 0-3.584-.012-4.849-.07-3.26-.149-4.771-1.699-4.919-4.92-.058-1.265-.07-1.644-.07-4.849 0-3.204.013-3.583.07-4.849.149-3.227 1.664-4.771 4.919-4.919 1.266-.057 1.645-.069 4.849-.069zm0-2.163c-3.259 0-3.667.014-4.947.072-4.358.2-6.78 2.618-6.98 6.98-.059 1.281-.073 1.689-.073 4.948 0 3.259.014 3.668.072 4.948.2 4.358 2.618 6.78 6.98 6.98 1.281.058 1.689.072 4.948.072 3.259 0 3.668-.014 4.948-.072 4.354-.2 6.782-2.618 6.979-6.98.059-1.28.073-1.689.073-4.948 0-3.259-.014-3.667-.072-4.947-.196-4.354-2.617-6.78-6.979-6.98-1.281-.059-1.69-.073-4.949-.073zm0 5.838c-3.403 0-6.162 2.759-6.162 6.162s2.759 6.163 6.162 6.163 6.162-2.759 6.162-6.163c0-3.403-2.759-6.162-6.162-6.162zm0 10.162c-2.209 0-4-1.79-4-4 0-2.209 1.791-4 4-4s4 1.791 4 4c0 2.21-1.791 4-4 4zm6.406-11.845c-.796 0-1.441.645-1.441 1.44s.645 1.44 1.441 1.44c.795 0 1.439-.645 1.439-1.44s-.644-1.44-1.439-1.44z"/>
+                  </svg>
+                </a>
+                <a href="https://www.tiktok.com/@_re_pete" target="_blank" rel="noopener noreferrer" className="social-link" title="TikTok">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M19.59 6.69a4.83 4.83 0 0 1-3.77-4.25V2h-3.45v13.67a2.89 2.89 0 0 1-5.2 1.74 2.89 2.89 0 0 1 2.31-4.64 2.93 2.93 0 0 1 .88.13V9.4a6.84 6.84 0 0 0-1-.05A6.33 6.33 0 0 0 5 20.1a6.34 6.34 0 0 0 10.86-4.43v-7a8.16 8.16 0 0 0 4.77 1.52v-3.4a4.85 4.85 0 0 1-1-.1z"/>
+                  </svg>
+                </a>
+                <a href="https://twitter.com/_re_pete" target="_blank" rel="noopener noreferrer" className="social-link" title="Twitter">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M23.953 4.57a10 10 0 01-2.825.775 4.958 4.958 0 002.163-2.723c-.951.555-2.005.959-3.127 1.184a4.92 4.92 0 00-8.384 4.482C7.69 8.095 4.067 6.13 1.64 3.162a4.822 4.822 0 00-.666 2.475c0 1.71.87 3.213 2.188 4.096a4.904 4.904 0 01-2.228-.616v.06a4.923 4.923 0 003.946 4.827 4.996 4.996 0 01-2.212.085 4.936 4.936 0 004.604 3.417 9.867 9.867 0 01-6.102 2.105c-.39 0-.779-.023-1.17-.067a13.995 13.995 0 007.557 2.209c9.053 0 13.998-7.496 13.998-13.985 0-.21 0-.42-.015-.63A9.935 9.935 0 0024 4.59z"/>
+                  </svg>
+                </a>
+                <a href="https://www.strava.com/athletes/63762822" target="_blank" rel="noopener noreferrer" className="social-link" title="Strava">
+                  <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                    <path d="M15.387 17.944l-2.089-4.116h-3.065L15.387 24l5.15-10.172h-3.066m-7.008-5.599l2.836 5.599h4.172L10.463 0l-7.007 13.828h4.169"/>
+                  </svg>
+                </a>
+              </div>
+
+              {/* Buy Me a Coffee */}
+              <div className="flex justify-center mt-4">
+                <a
+                  href="https://www.buymeacoffee.com/repete"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-[10px] uppercase tracking-wider py-2 px-4 border border-[#DDD] hover:border-[#FC4C02] hover:text-[#FC4C02] transition"
+                >
+                  ☕ BUY ME A COFFEE
+                </a>
+              </div>
+            </>
+          ) : selectedActivity ? (
             <>
               {/* Receipt format: Receipt-style layout with activity details, stats, route, and photos */}
               <div 
@@ -1908,14 +2451,14 @@ export default function Home() {
                   <div className="border-t border-[#DDD] pt-2 space-y-1.5">
                     <div className="flex items-center justify-between text-[10px] uppercase tracking-wider text-[#666]">
                       <label className="flex items-center gap-2 cursor-pointer">
-                        <input
-                          type="checkbox"
-                          checked={showPace}
-                          onChange={(e) => setShowPace(e.target.checked)}
-                          className="w-3 h-3 cursor-pointer"
-                        />
+                      <input
+                        type="checkbox"
+                        checked={showPace}
+                        onChange={(e) => setShowPace(e.target.checked)}
+                        className="w-3 h-3 cursor-pointer"
+                      />
                         <span>PACE/SPEED</span>
-                      </label>
+                    </label>
                       {showPace && (
                         <select
                           value={paceFormat}

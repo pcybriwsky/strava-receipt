@@ -116,6 +116,43 @@ export async function reverseGeocode(lat: number, lng: number): Promise<{ city?:
   }
 }
 
+// Decode Google Encoded Polyline to array of lat/lng points
+export function decodePolyline(encoded: string): Array<{ lat: number; lng: number }> {
+  const points: Array<{ lat: number; lng: number }> = [];
+  let index = 0;
+  let lat = 0;
+  let lng = 0;
+
+  while (index < encoded.length) {
+    // Decode latitude
+    let b: number;
+    let shift = 0;
+    let result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlat = (result & 1) ? ~(result >> 1) : (result >> 1);
+    lat += dlat;
+
+    // Decode longitude
+    shift = 0;
+    result = 0;
+    do {
+      b = encoded.charCodeAt(index++) - 63;
+      result |= (b & 0x1f) << shift;
+      shift += 5;
+    } while (b >= 0x20);
+    const dlng = (result & 1) ? ~(result >> 1) : (result >> 1);
+    lng += dlng;
+
+    points.push({ lat: lat / 1e5, lng: lng / 1e5 });
+  }
+
+  return points;
+}
+
 // Types
 export interface StravaActivity {
   id: number;
@@ -147,6 +184,11 @@ export interface StravaActivity {
   }> | null;
   pr_count?: number;
   achievement_count?: number;
+  map?: {
+    id: string;
+    summary_polyline: string | null;
+    polyline?: string | null;
+  } | null;
 }
 
 export interface StravaPhoto {
