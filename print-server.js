@@ -190,7 +190,9 @@ async function buildLogoRasterString(imagePath, maxWidth = LOGO_MAX_WIDTH) {
     const JimpClass = jimpModule.Jimp || jimpModule;
     const image = await JimpClass.read(imagePath);
     const targetWidth = Math.min(maxWidth, image.bitmap.width);
-    image.resize({ w: targetWidth });
+    const aspectRatio = image.bitmap.height / image.bitmap.width;
+    const targetHeight = Math.round(targetWidth * aspectRatio);
+    image.resize(targetWidth, targetHeight);
     image.greyscale();
     image.contrast(0.3);
     const { width, height, data } = image.bitmap;
@@ -306,7 +308,9 @@ async function buildGPSRouteRasterString(route, maxWidth = 512) {
     const JimpClass = jimpModule.Jimp || jimpModule;
     const image = await JimpClass.read(pngBuffer);
     const targetWidth = Math.min(maxWidth, image.bitmap.width);
-    image.resize({ w: targetWidth });
+    const aspectRatio = image.bitmap.height / image.bitmap.width;
+    const targetHeight = Math.round(targetWidth * aspectRatio);
+    image.resize(targetWidth, targetHeight);
     image.greyscale();
     image.contrast(0.3);
     
@@ -518,7 +522,9 @@ async function createAndPrintActivityReceipt(activity, route = null, photos = nu
               const JimpClass = jimpModule.Jimp || jimpModule;
               const image = await JimpClass.read(imageBuffer);
               const targetWidth = Math.min(400, image.bitmap.width);
-              image.resize({ w: targetWidth });
+              const aspectRatio = image.bitmap.height / image.bitmap.width;
+              const targetHeight = Math.round(targetWidth * aspectRatio);
+              image.resize(targetWidth, targetHeight);
               image.greyscale();
               image.contrast(0.2);
               

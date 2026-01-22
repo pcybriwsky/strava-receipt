@@ -165,11 +165,12 @@ export default function Home() {
   const [hasShownSupportModal, setHasShownSupportModal] = useState<boolean>(false);
   
   // Summary view state
-  const [viewMode, setViewMode] = useState<'single' | 'summary'>('single');
+  const [viewMode, setViewMode] = useState<'single' | 'summary' | 'manual'>('single');
   const [summaryPeriod, setSummaryPeriod] = useState<'week' | 'month' | '3month' | 'ytd' | '12month' | 'alltime' | 'custom'>('week');
   const [summaryCategory, setSummaryCategory] = useState<'distance' | 'time'>('distance');
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
+  const [manuallySelectedActivityIds, setManuallySelectedActivityIds] = useState<Set<number>>(new Set());
   
   const [currentPage, setCurrentPage] = useState(1);
   const [filterType, setFilterType] = useState<string>('All');
@@ -459,6 +460,22 @@ export default function Home() {
     } catch {
       handleLogout();
     }
+  };
+
+  // Toggle activity selection for manual mode
+  const toggleActivitySelection = (activityId: number) => {
+    setManuallySelectedActivityIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(activityId)) {
+        newSet.delete(activityId);
+      } else {
+        // Limit to 20 activities
+        if (newSet.size < 20) {
+          newSet.add(activityId);
+        }
+      }
+      return newSet;
+    });
   };
 
   const selectActivity = async (activity: StravaActivity) => {
@@ -1367,8 +1384,14 @@ export default function Home() {
     return `${formatDate(start)} - ${formatDate(end)}`;
   }, [getDateRange]);
 
-  // Filter activities by date range and category
+  // Filter activities by date range and category, or use manually selected activities
   const getFilteredSummaryActivities = useCallback((): StravaActivity[] => {
+    // If in manual mode, return manually selected activities
+    if (viewMode === 'manual') {
+      return allActivities.filter(activity => manuallySelectedActivityIds.has(activity.id));
+    }
+    
+    // Otherwise, use date range and category filters
     const { start, end } = getDateRange();
     
     return allActivities.filter(activity => {
@@ -1384,7 +1407,7 @@ export default function Home() {
         return true;
       }
     });
-  }, [allActivities, getDateRange, summaryCategory]);
+  }, [allActivities, getDateRange, summaryCategory, viewMode, manuallySelectedActivityIds]);
 
   // Aggregate activities by type
   interface AggregatedActivity {
@@ -1440,7 +1463,7 @@ export default function Home() {
 
   // Decode routes from activity polylines (no API calls needed!)
   const summaryRoutes = useMemo((): RoutePoint[][] => {
-    if (viewMode !== 'summary') return [];
+    if (viewMode !== 'summary' && viewMode !== 'manual') return [];
     
     const filtered = getFilteredSummaryActivities();
     const routes: RoutePoint[][] = [];
@@ -1696,6 +1719,11 @@ export default function Home() {
                 </span>
               </div>
             </div>
+            {viewMode === 'manual' && (
+              <div className="mb-2 p-2 bg-[#FC4C02] text-white text-[10px] uppercase tracking-wider text-center">
+                {manuallySelectedActivityIds.size} / 20 SELECTED
+              </div>
+            )}
             {hasMoreActivities && (
               <div className="flex gap-2 mb-2">
                 <button
@@ -1745,30 +1773,63 @@ export default function Home() {
               </div>
             ) : (
               <>
-                {paginatedActivities.map((activity) => (
-                  <div
-                    key={activity.id}
-                    onClick={() => selectActivity(activity)}
-                    className={`p-3 border-b border-[#DDD] cursor-pointer transition ${
-                      selectedActivity?.id === activity.id 
-                        ? 'bg-[#FC4C02] text-white' 
-                        : 'hover:bg-[#F0EDE8]'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between mb-1">
-                      <span className="text-[10px] uppercase tracking-wider opacity-70">
-                        {activity.type.toUpperCase()}
-                      </span>
-                      <span className="text-[10px] opacity-70 uppercase">
-                        {new Date(activity.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()}
-                      </span>
+                {paginatedActivities.map((activity) => {
+                  const isSelected = manuallySelectedActivityIds.has(activity.id);
+                  const isAtLimit = manuallySelectedActivityIds.size >= 20 && !isSelected;
+                  
+                  return (
+                    <div
+                      key={activity.id}
+                      onClick={(e) => {
+                        if (viewMode === 'manual') {
+                          e.stopPropagation();
+                          toggleActivitySelection(activity.id);
+                        } else {
+                          selectActivity(activity);
+                        }
+                      }}
+                      className={`p-3 border-b border-[#DDD] cursor-pointer transition ${
+                        viewMode === 'manual' 
+                          ? isSelected
+                            ? 'bg-[#FC4C02] text-white'
+                            : isAtLimit
+                              ? 'opacity-50 hover:bg-[#F0EDE8]'
+                              : 'hover:bg-[#F0EDE8]'
+                          : selectedActivity?.id === activity.id 
+                            ? 'bg-[#FC4C02] text-white' 
+                            : 'hover:bg-[#F0EDE8]'
+                      }`}
+                    >
+                      <div className="flex items-center justify-between mb-1">
+                        <div className="flex items-center gap-2">
+                          {viewMode === 'manual' && (
+                            <input
+                              type="checkbox"
+                              checked={isSelected}
+                              onChange={(e) => {
+                                e.stopPropagation();
+                                toggleActivitySelection(activity.id);
+                              }}
+                              disabled={isAtLimit}
+                              className="w-3 h-3 cursor-pointer"
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                          )}
+                          <span className="text-[10px] uppercase tracking-wider opacity-70">
+                            {activity.type.toUpperCase()}
+                          </span>
+                        </div>
+                        <span className="text-[10px] opacity-70 uppercase">
+                          {new Date(activity.start_date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }).toUpperCase()}
+                        </span>
+                      </div>
+                      <div className="text-xs font-bold truncate uppercase">{activity.name.toUpperCase()}</div>
+                      <div className="text-[10px] mt-1 opacity-80 uppercase">
+                        {formatDistance(activity.distance, units).toFixed(2)} {units === 'miles' ? 'MI' : 'KM'} · {formatDuration(activity.elapsed_time).toUpperCase()}
+                      </div>
                     </div>
-                    <div className="text-xs font-bold truncate uppercase">{activity.name.toUpperCase()}</div>
-                    <div className="text-[10px] mt-1 opacity-80 uppercase">
-                      {formatDistance(activity.distance, units).toFixed(2)} {units === 'miles' ? 'MI' : 'KM'} · {formatDuration(activity.elapsed_time).toUpperCase()}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </>
             )}
           </div>
@@ -1821,6 +1882,16 @@ export default function Home() {
             >
               SUMMARY
             </button>
+            <button
+              onClick={() => setViewMode('manual')}
+              className={`flex-1 py-2 text-[10px] uppercase tracking-wider font-bold transition ${
+                viewMode === 'manual' 
+                  ? 'bg-[#1A1A1A] text-white' 
+                  : 'text-[#666] hover:text-[#FC4C02]'
+              }`}
+            >
+              MANUAL
+            </button>
           </div>
 
           {error && (
@@ -1830,67 +1901,81 @@ export default function Home() {
           )}
 
           {/* Summary View */}
-          {viewMode === 'summary' ? (
+          {(viewMode === 'summary' || viewMode === 'manual') ? (
             <>
               {/* Summary Options */}
-              <div className="w-[320px] mb-4 space-y-2">
-                {/* Time Period Selector */}
-                <select
-                  value={summaryPeriod}
-                  onChange={(e) => setSummaryPeriod(e.target.value as typeof summaryPeriod)}
-                  className="w-full text-xs p-2 border border-[#DDD] bg-white uppercase tracking-wider"
-                >
-                  <option value="week">LAST 7 DAYS</option>
-                  <option value="month">LAST 30 DAYS</option>
-                  <option value="3month">LAST 3 MONTHS</option>
-                  <option value="ytd">YEAR TO DATE</option>
-                  <option value="12month">LAST 12 MONTHS</option>
-                  <option value="alltime">ALL TIME</option>
-                  <option value="custom">CUSTOM RANGE</option>
-                </select>
+              {viewMode === 'summary' && (
+                <div className="w-[320px] mb-4 space-y-2">
+                  {/* Time Period Selector */}
+                  <select
+                    value={summaryPeriod}
+                    onChange={(e) => setSummaryPeriod(e.target.value as typeof summaryPeriod)}
+                    className="w-full text-xs p-2 border border-[#DDD] bg-white uppercase tracking-wider"
+                  >
+                    <option value="week">LAST 7 DAYS</option>
+                    <option value="month">LAST 30 DAYS</option>
+                    <option value="3month">LAST 3 MONTHS</option>
+                    <option value="ytd">YEAR TO DATE</option>
+                    <option value="12month">LAST 12 MONTHS</option>
+                    <option value="alltime">ALL TIME</option>
+                    <option value="custom">CUSTOM RANGE</option>
+                  </select>
 
-                {/* Custom Date Range */}
-                {summaryPeriod === 'custom' && (
-                  <div className="flex gap-2">
-                    <input
-                      type="date"
-                      value={customStartDate}
-                      onChange={(e) => setCustomStartDate(e.target.value)}
-                      className="flex-1 text-xs p-2 border border-[#DDD] bg-white uppercase tracking-wider"
-                    />
-                    <input
-                      type="date"
-                      value={customEndDate}
-                      onChange={(e) => setCustomEndDate(e.target.value)}
-                      className="flex-1 text-xs p-2 border border-[#DDD] bg-white uppercase tracking-wider"
-                    />
+                  {/* Custom Date Range */}
+                  {summaryPeriod === 'custom' && (
+                    <div className="flex gap-2">
+                      <input
+                        type="date"
+                        value={customStartDate}
+                        onChange={(e) => setCustomStartDate(e.target.value)}
+                        className="flex-1 text-xs p-2 border border-[#DDD] bg-white uppercase tracking-wider"
+                      />
+                      <input
+                        type="date"
+                        value={customEndDate}
+                        onChange={(e) => setCustomEndDate(e.target.value)}
+                        className="flex-1 text-xs p-2 border border-[#DDD] bg-white uppercase tracking-wider"
+                      />
+                    </div>
+                  )}
+
+                  {/* Category Toggle */}
+                  <div className="flex border border-[#DDD] bg-white">
+                    <button
+                      onClick={() => setSummaryCategory('distance')}
+                      className={`flex-1 py-2 text-[10px] uppercase tracking-wider transition ${
+                        summaryCategory === 'distance' 
+                          ? 'bg-[#FC4C02] text-white font-bold' 
+                          : 'text-[#666] hover:text-[#FC4C02]'
+                      }`}
+                    >
+                      DISTANCE
+                    </button>
+                    <button
+                      onClick={() => setSummaryCategory('time')}
+                      className={`flex-1 py-2 text-[10px] uppercase tracking-wider transition ${
+                        summaryCategory === 'time' 
+                          ? 'bg-[#FC4C02] text-white font-bold' 
+                          : 'text-[#666] hover:text-[#FC4C02]'
+                      }`}
+                    >
+                      ALL ACTIVITIES
+                    </button>
                   </div>
-                )}
-
-                {/* Category Toggle */}
-                <div className="flex border border-[#DDD] bg-white">
-                  <button
-                    onClick={() => setSummaryCategory('distance')}
-                    className={`flex-1 py-2 text-[10px] uppercase tracking-wider transition ${
-                      summaryCategory === 'distance' 
-                        ? 'bg-[#FC4C02] text-white font-bold' 
-                        : 'text-[#666] hover:text-[#FC4C02]'
-                    }`}
-                  >
-                    DISTANCE
-                  </button>
-                  <button
-                    onClick={() => setSummaryCategory('time')}
-                    className={`flex-1 py-2 text-[10px] uppercase tracking-wider transition ${
-                      summaryCategory === 'time' 
-                        ? 'bg-[#FC4C02] text-white font-bold' 
-                        : 'text-[#666] hover:text-[#FC4C02]'
-                    }`}
-                  >
-                    ALL ACTIVITIES
-                  </button>
                 </div>
-              </div>
+              )}
+              
+              {/* Manual Mode Info */}
+              {viewMode === 'manual' && (
+                <div className="w-[320px] mb-4 p-3 border border-[#DDD] bg-white">
+                  <div className="text-[10px] uppercase tracking-wider text-[#666] text-center">
+                    SELECT ACTIVITIES FROM SIDEBAR
+                  </div>
+                  <div className="text-[10px] uppercase tracking-wider text-[#FC4C02] text-center mt-1 font-bold">
+                    {manuallySelectedActivityIds.size} / 20 SELECTED
+                  </div>
+                </div>
+              )}
 
               {/* Summary Receipt */}
               <div 
@@ -1916,7 +2001,9 @@ export default function Home() {
                       ACTIVITY SUMMARY
                     </div>
                     <div className="text-[10px] text-[#666] mt-1 uppercase tracking-wider">
-                      {formatDateRange()}
+                      {viewMode === 'manual' 
+                        ? `${manuallySelectedActivityIds.size} SELECTED ACTIVITIES`
+                        : formatDateRange()}
                     </div>
                   </div>
 
@@ -2594,15 +2681,16 @@ export default function Home() {
                   </button>
                 </div>
 
-                {/* Print Button - Commented out for now, useful for testing print server */}
-
-                {/* <button 
-                  onClick={handlePrint}
-                  disabled={isPrinting || !selectedActivity}
-                  className="w-full bg-[#666] hover:bg-[#777] text-white text-[10px] font-bold py-3 uppercase tracking-widest transition disabled:opacity-50"
-                >
-                  {isPrinting ? 'PRINTING...' : 'PRINT RECEIPT'}
-                </button> */}
+                {/* Print Button - Only shown on localhost for testing print server */}
+                {typeof window !== 'undefined' && window.location.hostname === 'localhost' && (
+                  <button 
+                    onClick={handlePrint}
+                    disabled={isPrinting || !selectedActivity}
+                    className="w-full bg-[#666] hover:bg-[#777] text-white text-[10px] font-bold py-3 uppercase tracking-widest transition disabled:opacity-50"
+                  >
+                    {isPrinting ? 'PRINTING...' : 'PRINT RECEIPT'}
+                  </button>
+                )}
               </div>
 
               {/* Social Links - Below receipt */}

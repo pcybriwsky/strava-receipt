@@ -10,10 +10,12 @@
   },
   "dependencies": {
     "html-to-image": "^1.11.13",
+    "jimp": "^0.22.10",
     "next": "16.1.1",
     "qrcode.react": "^4.2.0",
     "react": "19.2.3",
-    "react-dom": "19.2.3"
+    "react-dom": "19.2.3",
+    "sharp": "^0.33.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
