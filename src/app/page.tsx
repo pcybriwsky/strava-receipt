@@ -171,6 +171,7 @@ export default function Home() {
   const [customStartDate, setCustomStartDate] = useState<string>('');
   const [customEndDate, setCustomEndDate] = useState<string>('');
   const [manuallySelectedActivityIds, setManuallySelectedActivityIds] = useState<Set<number>>(new Set());
+  const [manualModeType, setManualModeType] = useState<'sequence' | 'aggregate'>('aggregate');
   
   const [currentPage, setCurrentPage] = useState(1);
   const [filterType, setFilterType] = useState<string>('All');
@@ -1279,6 +1280,42 @@ export default function Home() {
     return parts.length > 0 ? parts.join(', ') : 'ACTIVITY';
   };
 
+  // Check if manually selected activities share the same location (city level)
+  const getSharedLocation = useCallback((): string | null => {
+    if (viewMode !== 'manual' || manuallySelectedActivityIds.size === 0) return null;
+    
+    const selectedActivities = allActivities.filter(a => manuallySelectedActivityIds.has(a.id));
+    if (selectedActivities.length === 0) return null;
+    
+    // Get all unique cities from selected activities
+    const cities = selectedActivities
+      .map(a => a.location_city?.trim().toUpperCase())
+      .filter((city): city is string => !!city);
+    
+    if (cities.length === 0) return null;
+    
+    // Check if all activities have the same city
+    const uniqueCities = new Set(cities);
+    if (uniqueCities.size === 1) {
+      // All activities share the same city, return it
+      const city = Array.from(uniqueCities)[0];
+      // Try to get state/country from first activity for context
+      const firstActivity = selectedActivities.find(a => a.location_city?.trim().toUpperCase() === city);
+      if (firstActivity) {
+        const parts = [city];
+        if (firstActivity.location_state?.trim()) {
+          parts.push(firstActivity.location_state.toUpperCase().trim());
+        } else if (firstActivity.location_country?.trim()) {
+          parts.push(firstActivity.location_country.toUpperCase().trim());
+        }
+        return parts.join(', ');
+      }
+      return city;
+    }
+    
+    return null; // Activities are in different locations
+  }, [viewMode, manuallySelectedActivityIds, allActivities]);
+
   // Format PR count (receipt-style, no emojis)
   const formatPRCount = (activity: StravaActivity): string | null => {
     if (!activity.achievements || activity.achievements.length === 0) {
@@ -1419,6 +1456,23 @@ export default function Home() {
 
   const getAggregatedActivities = useCallback((): AggregatedActivity[] => {
     const filtered = getFilteredSummaryActivities();
+    
+    // For sequence mode, show activities in chronological order (not aggregated)
+    if (viewMode === 'manual' && manualModeType === 'sequence') {
+      // Sort by start date, then return as individual items
+      const sorted = [...filtered].sort((a, b) => 
+        new Date(a.start_date).getTime() - new Date(b.start_date).getTime()
+      );
+      
+      return sorted.map(activity => ({
+        type: activity.type,
+        count: 1,
+        totalDistance: activity.distance || 0,
+        totalTime: activity.elapsed_time || 0
+      }));
+    }
+    
+    // For aggregate mode, group by type
     const aggregated = new Map<string, AggregatedActivity>();
     
     filtered.forEach(activity => {
@@ -1439,7 +1493,7 @@ export default function Home() {
     
     // Sort by count descending
     return Array.from(aggregated.values()).sort((a, b) => b.count - a.count);
-  }, [getFilteredSummaryActivities]);
+  }, [getFilteredSummaryActivities, viewMode, manualModeType]);
 
   // Get totals across all filtered activities
   const getSummaryTotals = useCallback((): { totalDistance: number; totalTime: number; activityCount: number } => {
@@ -1491,27 +1545,81 @@ export default function Home() {
     
     const width = 280, height = 200;
     
-    // Normalize each route to the same bounding box
+    // For sequence mode, normalize all routes to a shared bounding box for spatial alignment
+    // For aggregate mode, normalize each route to its own bounding box
+    const useSharedBounds = viewMode === 'manual' && manualModeType === 'sequence';
+    
+    let sharedMinLat: number | null = null;
+    let sharedMaxLat: number | null = null;
+    let sharedMinLng: number | null = null;
+    let sharedMaxLng: number | null = null;
+    
+    if (useSharedBounds && summaryRoutes.length > 0) {
+      // Calculate shared bounding box for all routes
+      summaryRoutes.forEach(route => {
+        route.forEach(p => {
+          if (sharedMinLat === null || p.lat < sharedMinLat) {
+            sharedMinLat = p.lat;
+          }
+          if (sharedMaxLat === null || p.lat > sharedMaxLat) {
+            sharedMaxLat = p.lat;
+          }
+          if (sharedMinLng === null || p.lng < sharedMinLng) {
+            sharedMinLng = p.lng;
+          }
+          if (sharedMaxLng === null || p.lng > sharedMaxLng) {
+            sharedMaxLng = p.lng;
+          }
+        });
+      });
+      
+      // Add padding to shared bounds
+      if (sharedMinLat !== null && sharedMaxLat !== null && sharedMinLng !== null && sharedMaxLng !== null) {
+        const latRange = sharedMaxLat - sharedMinLat || 0.001;
+        const lngRange = sharedMaxLng - sharedMinLng || 0.001;
+        const padding = Math.max(latRange, lngRange) * 0.1;
+        sharedMinLat = sharedMinLat - padding;
+        sharedMaxLat = sharedMaxLat + padding;
+        sharedMinLng = sharedMinLng - padding;
+        sharedMaxLng = sharedMaxLng + padding;
+      }
+    }
+    
+    // Normalize each route
     const normalizedPaths = summaryRoutes.map((route, routeIndex) => {
       if (route.length < 2) return null;
       
-      // Find bounds for this route
-      let minLat = route[0].lat, maxLat = route[0].lat;
-      let minLng = route[0].lng, maxLng = route[0].lng;
+      let minLat: number, maxLat: number, minLng: number, maxLng: number;
       
-      route.forEach(p => {
-        minLat = Math.min(minLat, p.lat);
-        maxLat = Math.max(maxLat, p.lat);
-        minLng = Math.min(minLng, p.lng);
-        maxLng = Math.max(maxLng, p.lng);
-      });
-      
-      // Add padding
-      const latRange = maxLat - minLat || 0.001;
-      const lngRange = maxLng - minLng || 0.001;
-      const padding = Math.max(latRange, lngRange) * 0.1;
-      minLat -= padding; maxLat += padding;
-      minLng -= padding; maxLng += padding;
+      if (useSharedBounds && sharedMinLat !== null && sharedMaxLat !== null && sharedMinLng !== null && sharedMaxLng !== null) {
+        // Use shared bounds for sequence mode
+        minLat = sharedMinLat;
+        maxLat = sharedMaxLat;
+        minLng = sharedMinLng;
+        maxLng = sharedMaxLng;
+      } else {
+        // Find bounds for this individual route (aggregate mode)
+        minLat = route[0].lat;
+        maxLat = route[0].lat;
+        minLng = route[0].lng;
+        maxLng = route[0].lng;
+        
+        route.forEach(p => {
+          minLat = Math.min(minLat, p.lat);
+          maxLat = Math.max(maxLat, p.lat);
+          minLng = Math.min(minLng, p.lng);
+          maxLng = Math.max(maxLng, p.lng);
+        });
+        
+        // Add padding
+        const latRange = maxLat - minLat || 0.001;
+        const lngRange = maxLng - minLng || 0.001;
+        const padding = Math.max(latRange, lngRange) * 0.1;
+        minLat -= padding;
+        maxLat += padding;
+        minLng -= padding;
+        maxLng += padding;
+      }
       
       // Normalize to SVG coordinates
       const pathData = route.map((p, i) => {
@@ -1539,7 +1647,7 @@ export default function Home() {
         {normalizedPaths}
       </svg>
     );
-  }, [summaryRoutes]);
+  }, [summaryRoutes, viewMode, manualModeType]);
 
   // Get Strava profile URL
   const getStravaProfileUrl = () => 'https://www.strava.com/athletes/63762822';
@@ -1967,13 +2075,46 @@ export default function Home() {
               
               {/* Manual Mode Info */}
               {viewMode === 'manual' && (
-                <div className="w-[320px] mb-4 p-3 border border-[#DDD] bg-white">
-                  <div className="text-[10px] uppercase tracking-wider text-[#666] text-center">
-                    SELECT ACTIVITIES FROM SIDEBAR
+                <div className="w-[320px] mb-4 space-y-2">
+                  <div className="p-3 border border-[#DDD] bg-white">
+                    <div className="text-[10px] uppercase tracking-wider text-[#666] text-center">
+                      SELECT ACTIVITIES FROM SIDEBAR
+                    </div>
+                    <div className="text-[10px] uppercase tracking-wider text-[#FC4C02] text-center mt-1 font-bold">
+                      {manuallySelectedActivityIds.size} / 20 SELECTED
+                    </div>
                   </div>
-                  <div className="text-[10px] uppercase tracking-wider text-[#FC4C02] text-center mt-1 font-bold">
-                    {manuallySelectedActivityIds.size} / 20 SELECTED
+                  
+                  {/* Sequence vs Aggregate Toggle */}
+                  <div className="flex border border-[#DDD] bg-white">
+                    <button
+                      onClick={() => setManualModeType('aggregate')}
+                      className={`flex-1 py-2 text-[10px] uppercase tracking-wider transition ${
+                        manualModeType === 'aggregate' 
+                          ? 'bg-[#FC4C02] text-white font-bold' 
+                          : 'text-[#666] hover:text-[#FC4C02]'
+                      }`}
+                    >
+                      AGGREGATE
+                    </button>
+                    <button
+                      onClick={() => setManualModeType('sequence')}
+                      className={`flex-1 py-2 text-[10px] uppercase tracking-wider transition ${
+                        manualModeType === 'sequence' 
+                          ? 'bg-[#FC4C02] text-white font-bold' 
+                          : 'text-[#666] hover:text-[#FC4C02]'
+                      }`}
+                    >
+                      SEQUENCE
+                    </button>
                   </div>
+                  
+                  {/* Show shared location if in sequence mode */}
+                  {manualModeType === 'sequence' && getSharedLocation() && (
+                    <div className="p-2 border border-[#DDD] bg-white text-[10px] uppercase tracking-wider text-center text-[#666]">
+                      LOCATION: {getSharedLocation()}
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -1998,11 +2139,15 @@ export default function Home() {
                       style={{ filter: 'grayscale(100%)' }}
                     />
                     <div className="text-sm font-bold uppercase tracking-wider">
-                      ACTIVITY SUMMARY
+                      {viewMode === 'manual' && manualModeType === 'sequence' 
+                        ? 'ACTIVITY SEQUENCE'
+                        : 'ACTIVITY SUMMARY'}
                     </div>
                     <div className="text-[10px] text-[#666] mt-1 uppercase tracking-wider">
                       {viewMode === 'manual' 
-                        ? `${manuallySelectedActivityIds.size} SELECTED ACTIVITIES`
+                        ? manualModeType === 'sequence' && getSharedLocation()
+                          ? getSharedLocation()
+                          : `${manuallySelectedActivityIds.size} SELECTED ACTIVITIES`
                         : formatDateRange()}
                     </div>
                   </div>
@@ -2021,7 +2166,11 @@ export default function Home() {
                         {getAggregatedActivities().map((agg, idx) => (
                           <div key={idx}>
                             <div className="flex justify-between text-xs uppercase tracking-wider">
-                              <span>{agg.count} {agg.type.toUpperCase()}{agg.count > 1 ? 'S' : ''}</span>
+                              <span>
+                                {viewMode === 'manual' && manualModeType === 'sequence'
+                                  ? `${idx + 1}. ${agg.type.toUpperCase()}`
+                                  : `${agg.count} ${agg.type.toUpperCase()}${agg.count > 1 ? 'S' : ''}`}
+                              </span>
                               <span>
                                 {summaryCategory === 'distance' && agg.totalDistance > 0
                                   ? formatDistance(agg.totalDistance, units).toFixed(2)
@@ -2031,7 +2180,9 @@ export default function Home() {
                             </div>
                             {summaryCategory === 'distance' && agg.totalDistance > 0 && (
                               <div className="pl-3 text-[10px] uppercase tracking-wider text-[#666]">
-                                TOTAL TIME: {formatTotalDuration(agg.totalTime)}
+                                {viewMode === 'manual' && manualModeType === 'sequence'
+                                  ? `TIME: ${formatTotalDuration(agg.totalTime)}`
+                                  : `TOTAL TIME: ${formatTotalDuration(agg.totalTime)}`}
                               </div>
                             )}
                           </div>
@@ -2067,7 +2218,9 @@ export default function Home() {
                         <>
                           <hr className="receipt-divider" />
                           <div className="text-center text-[10px] uppercase tracking-wider mb-2 text-[#666]">
-                            ROUTE SIGNATURES ({summaryRoutes.length})
+                            {viewMode === 'manual' && manualModeType === 'sequence'
+                              ? `ROUTE SEQUENCE (${summaryRoutes.length} ${summaryRoutes.length === 1 ? 'SEGMENT' : 'SEGMENTS'})`
+                              : `ROUTE SIGNATURES (${summaryRoutes.length})`}
                           </div>
                           <div className="mb-3 flex justify-center">
                             {renderOverlaidRoutes()}
