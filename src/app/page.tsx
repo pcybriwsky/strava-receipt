@@ -144,6 +144,7 @@ export default function Home() {
   const [athleteCopyText, setAthleteCopyText] = useState<string>('ATHLETE COPY');
   const [units, setUnits] = useState<'miles' | 'km'>('miles');
   const [showMoreOptions, setShowMoreOptions] = useState<boolean>(false);
+  const [showActivityName, setShowActivityName] = useState<boolean>(false);
 
   useEffect(() => {
     if (selectedActivity) {
@@ -1452,6 +1453,7 @@ export default function Home() {
     count: number;
     totalDistance: number;
     totalTime: number;
+    name?: string; // Activity name for display
   }
 
   const getAggregatedActivities = useCallback((): AggregatedActivity[] => {
@@ -1468,7 +1470,8 @@ export default function Home() {
         type: activity.type,
         count: 1,
         totalDistance: activity.distance || 0,
-        totalTime: activity.elapsed_time || 0
+        totalTime: activity.elapsed_time || 0,
+        name: removeEmojis(activity.name)
       }));
     }
     
@@ -1481,12 +1484,14 @@ export default function Home() {
         existing.count++;
         existing.totalDistance += activity.distance || 0;
         existing.totalTime += activity.elapsed_time || 0;
+        // Keep the first activity's name
       } else {
         aggregated.set(activity.type, {
           type: activity.type,
           count: 1,
           totalDistance: activity.distance || 0,
-          totalTime: activity.elapsed_time || 0
+          totalTime: activity.elapsed_time || 0,
+          name: removeEmojis(activity.name)
         });
       }
     });
@@ -1657,13 +1662,19 @@ export default function Home() {
   return (
       <div className="min-h-screen flex flex-col items-center justify-center p-4" style={{ background: '#FAF9F6' }}>
         <div className="w-full max-w-[320px] text-center">
-          {/* Header with About link */}
-          <div className="flex justify-end mb-4">
+          {/* Header with About and Features links */}
+          <div className="flex justify-end gap-3 mb-4">
             <Link 
               href="/about"
               className="text-[10px] text-[#666] hover:text-[#FC4C02] uppercase tracking-wider"
             >
               [ABOUT]
+            </Link>
+            <Link 
+              href="/features"
+              className="text-[10px] text-[#666] hover:text-[#FC4C02] uppercase tracking-wider"
+            >
+              [FEATURES]
             </Link>
           </div>
           
@@ -1799,6 +1810,12 @@ export default function Home() {
             className="text-[10px] text-[#666] hover:text-[#FC4C02] uppercase tracking-wider"
           >
             [ABOUT]
+          </Link>
+          <Link 
+            href="/features"
+            className="text-[10px] text-[#666] hover:text-[#FC4C02] uppercase tracking-wider"
+          >
+            [FEATURES]
           </Link>
           <button onClick={handleLogout} className="text-[10px] text-[#666] hover:text-[#FC4C02] uppercase tracking-wider">
             [LOGOUT]
@@ -2168,8 +2185,8 @@ export default function Home() {
                             <div className="flex justify-between text-xs uppercase tracking-wider">
                               <span>
                                 {viewMode === 'manual' && manualModeType === 'sequence'
-                                  ? `${idx + 1}. ${agg.type.toUpperCase()}`
-                                  : `${agg.count} ${agg.type.toUpperCase()}${agg.count > 1 ? 'S' : ''}`}
+                                  ? `${idx + 1}. ${agg.type.toUpperCase()}${showActivityName && agg.name ? ` - ${agg.name.toUpperCase()}` : ''}`
+                                  : `${agg.count} ${agg.type.toUpperCase()}${agg.count > 1 ? 'S' : ''}${showActivityName && agg.name ? ` - ${agg.name.toUpperCase()}` : ''}`}
                               </span>
                               <span>
                                 {summaryCategory === 'distance' && agg.totalDistance > 0
@@ -2295,6 +2312,15 @@ export default function Home() {
                     className="w-3 h-3 cursor-pointer"
                   />
                 </label>
+                <label className="flex items-center justify-between cursor-pointer text-[10px] uppercase tracking-wider text-[#666] py-1">
+                  <span>ACTIVITY NAME</span>
+                  <input
+                    type="checkbox"
+                    checked={showActivityName}
+                    onChange={(e) => setShowActivityName(e.target.checked)}
+                    className="w-3 h-3 cursor-pointer"
+                  />
+                </label>
                 <div className="flex items-center justify-between py-1">
                   <span className="text-[10px] uppercase tracking-wider text-[#666]">UNITS</span>
                   <select
@@ -2414,7 +2440,10 @@ export default function Home() {
                   {/* Activity Line */}
                   <div className="mb-3">
                     <div className="flex justify-between text-xs uppercase tracking-wider">
-                      <span>1 {selectedActivity.type.toUpperCase()}</span>
+                      <span>
+                        1 {selectedActivity.type.toUpperCase()}
+                        {showActivityName && selectedActivity.name && ` - ${removeEmojis(selectedActivity.name).toUpperCase()}`}
+                      </span>
                       <span>{formatDistance(selectedActivity.distance, units).toFixed(2)}</span>
                     </div>
                     {/* Indented stats like physical receipt */}
@@ -2661,6 +2690,15 @@ export default function Home() {
                       type="checkbox"
                       checked={showQRCode}
                       onChange={(e) => setShowQRCode(e.target.checked)}
+                      className="w-3 h-3 cursor-pointer"
+                    />
+                  </label>
+                  <label className="flex items-center justify-between cursor-pointer text-[10px] uppercase tracking-wider text-[#666] py-1">
+                    <span>ACTIVITY NAME</span>
+                    <input
+                      type="checkbox"
+                      checked={showActivityName}
+                      onChange={(e) => setShowActivityName(e.target.checked)}
                       className="w-3 h-3 cursor-pointer"
                     />
                   </label>
