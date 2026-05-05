@@ -55,6 +55,84 @@ const ACTIVITIES_CACHE_KEY = 'strava_activities_cache';
 const ACTIVITIES_CACHE_TIMESTAMP_KEY = 'strava_activities_cache_timestamp';
 const ACTIVITIES_COUNT_KEY = 'strava_activities_count';
 const CACHE_EXPIRY_MS = 60 * 60 * 1000;
+
+const ACTIVITY_DETAIL_CACHE_PREFIX = 'strava_activity_detail_';
+const ACTIVITY_DETAIL_INDEX_KEY = 'strava_activity_detail_index';
+const ACTIVITY_DETAIL_TTL_MS = 24 * 60 * 60 * 1000;
+const ACTIVITY_DETAIL_MAX_ENTRIES = 100;
+
+type ActivityDetailCache = {
+  activity: StravaActivity;
+  route: RoutePoint[] | null;
+  photos: StravaPhoto[] | null;
+  timestamp: number;
+};
+
+const getCachedActivityDetail = (id: number): ActivityDetailCache | null => {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = localStorage.getItem(`${ACTIVITY_DETAIL_CACHE_PREFIX}${id}`);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as ActivityDetailCache;
+    if (Date.now() - parsed.timestamp > ACTIVITY_DETAIL_TTL_MS) {
+      localStorage.removeItem(`${ACTIVITY_DETAIL_CACHE_PREFIX}${id}`);
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+};
+
+const setCachedActivityDetail = (id: number, data: Omit<ActivityDetailCache, 'timestamp'>) => {
+  if (typeof window === 'undefined') return;
+  try {
+    const payload: ActivityDetailCache = { ...data, timestamp: Date.now() };
+    localStorage.setItem(`${ACTIVITY_DETAIL_CACHE_PREFIX}${id}`, JSON.stringify(payload));
+
+    const indexRaw = localStorage.getItem(ACTIVITY_DETAIL_INDEX_KEY);
+    const index: number[] = indexRaw ? JSON.parse(indexRaw) : [];
+    const filtered = index.filter(x => x !== id);
+    filtered.push(id);
+    while (filtered.length > ACTIVITY_DETAIL_MAX_ENTRIES) {
+      const evict = filtered.shift();
+      if (evict !== undefined) {
+        localStorage.removeItem(`${ACTIVITY_DETAIL_CACHE_PREFIX}${evict}`);
+      }
+    }
+    localStorage.setItem(ACTIVITY_DETAIL_INDEX_KEY, JSON.stringify(filtered));
+  } catch (err) {
+    console.error('Error saving activity detail cache:', err);
+  }
+};
+
+const clearCachedActivityDetail = (id: number) => {
+  if (typeof window === 'undefined') return;
+  try {
+    localStorage.removeItem(`${ACTIVITY_DETAIL_CACHE_PREFIX}${id}`);
+    const indexRaw = localStorage.getItem(ACTIVITY_DETAIL_INDEX_KEY);
+    if (indexRaw) {
+      const index: number[] = JSON.parse(indexRaw);
+      localStorage.setItem(ACTIVITY_DETAIL_INDEX_KEY, JSON.stringify(index.filter(x => x !== id)));
+    }
+  } catch {
+    // ignore
+  }
+};
+
+const clearActivityDetailCache = () => {
+  if (typeof window === 'undefined') return;
+  try {
+    const indexRaw = localStorage.getItem(ACTIVITY_DETAIL_INDEX_KEY);
+    if (indexRaw) {
+      const index: number[] = JSON.parse(indexRaw);
+      index.forEach(id => localStorage.removeItem(`${ACTIVITY_DETAIL_CACHE_PREFIX}${id}`));
+    }
+    localStorage.removeItem(ACTIVITY_DETAIL_INDEX_KEY);
+  } catch {
+    // ignore
+  }
+};
 const getCachedActivities = (): StravaActivity[] | null => {
   if (typeof window === 'undefined') return null;
   
@@ -484,8 +562,21 @@ export default function Home() {
     setSelectedRoute(null);
     setSelectedPhotos(null);
     setSelectedPhotoIndices(new Set());
-    
+
     console.log('🏃 Selected Activity (initial):', activity);
+
+    const cached = getCachedActivityDetail(activity.id);
+    if (cached) {
+      console.log('💾 Using cached activity detail for', activity.id);
+      setSelectedActivity(cached.activity);
+      if (cached.route) setSelectedRoute(cached.route);
+      if (cached.photos && cached.photos.length > 0) {
+        setSelectedPhotos(cached.photos);
+        setSelectedPhotoIndices(new Set(cached.photos.map((_, idx) => idx)));
+        setPhotoLoadStates(new Map());
+      }
+      return;
+    }
     
     const fetchWithAuth = async (url: string, options: RequestInit = {}): Promise<Response> => {
       let currentToken = accessToken;
@@ -598,7 +689,10 @@ export default function Home() {
     }
     
     setSelectedActivity(activityWithLocation);
-    
+
+    let fetchedRoute: RoutePoint[] | null = null;
+    let fetchedPhotos: StravaPhoto[] | null = null;
+
     if (activitySupportsGPS(activity.type)) {
       try {
         const response = await fetchWithAuth(
@@ -611,7 +705,8 @@ export default function Home() {
         if (response.ok) {
           const data = await response.json();
           if (data.latlng?.data) {
-            setSelectedRoute(data.latlng.data.map((p: number[]) => ({ lat: p[0], lng: p[1] })));
+            fetchedRoute = data.latlng.data.map((p: number[]) => ({ lat: p[0], lng: p[1] }));
+            setSelectedRoute(fetchedRoute);
           }
         }
       } catch (err) {
@@ -668,6 +763,7 @@ export default function Home() {
             console.log(`✅ All ${filteredPhotos.length} photos are unique`);
           }
           
+          fetchedPhotos = filteredPhotos;
           setSelectedPhotos(filteredPhotos);
 
           setSelectedPhotoIndices(new Set(filteredPhotos.map((_, idx) => idx)));
@@ -678,6 +774,18 @@ export default function Home() {
     } catch (err) {
       console.error('Failed to fetch photos:', err);
     }
+
+    setCachedActivityDetail(activity.id, {
+      activity: activityWithLocation,
+      route: fetchedRoute,
+      photos: fetchedPhotos,
+    });
+  };
+
+  const handleRefreshActivity = async () => {
+    if (!selectedActivity) return;
+    clearCachedActivityDetail(selectedActivity.id);
+    await selectActivity(selectedActivity);
   };
 
   const handleLogin = () => {
@@ -697,6 +805,7 @@ export default function Home() {
     localStorage.removeItem('strava_access_token');
     localStorage.removeItem('strava_refresh_token');
     clearActivitiesCache(); // Clear activities cache on logout
+    clearActivityDetailCache();
   };
 
   const waitForImageDecode = (img: HTMLImageElement): Promise<void> => {
@@ -2874,7 +2983,7 @@ export default function Home() {
 
                 {/* Print Button - Only shown on localhost for testing print server */}
                 {typeof window !== 'undefined' && window.location.hostname === 'localhost' && (
-                  <button 
+                  <button
                     onClick={handlePrint}
                     disabled={isPrinting || !selectedActivity}
                     className="w-full bg-[#666] hover:bg-[#777] text-white text-[10px] font-bold py-3 uppercase tracking-widest transition disabled:opacity-50"
@@ -2882,6 +2991,17 @@ export default function Home() {
                     {isPrinting ? 'PRINTING...' : 'PRINT RECEIPT'}
                   </button>
                 )}
+
+                <button
+                  onClick={handleRefreshActivity}
+                  disabled={isDownloading || !selectedActivity}
+                  className="w-full text-[9px] text-[#888] hover:text-[#FC4C02] uppercase tracking-wider py-1 transition disabled:opacity-50"
+                >
+                  ↻ Refresh from Strava
+                </button>
+                <p className="text-[9px] text-[#AAA] text-center leading-relaxed -mt-1">
+                  Activity details are cached for 24 hours to keep us under Strava&apos;s API limits. Click refresh if you&apos;ve recently edited the title, photos, or other details on Strava.
+                </p>
               </div>
 
               {/* Social Links - Below receipt */}
