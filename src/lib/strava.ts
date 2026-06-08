@@ -91,20 +91,20 @@ export async function reverseGeocode(lat: number, lng: number): Promise<{ city?:
         }
       }
     );
-    
+
     if (!response.ok) {
       console.warn('Reverse geocoding failed:', response.status);
       return null;
     }
-    
+
     const data = await response.json();
     const address = data.address || {};
-    
+
     // Extract location components (field names vary by country)
     const city = address.city || address.town || address.village || address.municipality || address.county;
     const state = address.state || address.region || address.province;
     const country = address.country;
-    
+
     return {
       city: city || undefined,
       state: state || undefined,

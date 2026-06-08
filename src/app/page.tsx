@@ -673,7 +673,7 @@ export default function Home() {
         console.log('🏆 Final Achievements:', activityWithLocation.achievements);
         console.log('📊 Final PR Count:', activityWithLocation.pr_count);
         console.log('🎯 Final Achievement Count:', activityWithLocation.achievement_count);
-        
+
         if (!activityWithLocation.location_city && activityWithLocation.start_latlng && activityWithLocation.start_latlng.length === 2) {
           const [lat, lng] = activityWithLocation.start_latlng;
           const geoLocation = await reverseGeocode(lat, lng);
@@ -1773,13 +1773,13 @@ export default function Home() {
         <div className="w-full max-w-[320px] text-center">
           {/* Header with About and Features links */}
           <div className="flex justify-end gap-3 mb-4">
-            <Link 
+            <Link
               href="/about"
               className="text-[10px] text-[#666] hover:text-[#FC4C02] uppercase tracking-wider"
             >
               [ABOUT]
             </Link>
-            <Link 
+            <Link
               href="/features"
               className="text-[10px] text-[#666] hover:text-[#FC4C02] uppercase tracking-wider"
             >
@@ -1790,10 +1790,9 @@ export default function Home() {
         <Image
             src="/Strava_Logo.svg.png" 
             alt="STRAVA" 
-            width={160} 
-            height={40} 
+            width={160}
+            height={40}
             className="mx-auto mb-6"
-            style={{ filter: 'grayscale(100%)' }}
           />
           <hr className="receipt-divider" />
           <h1 className="text-xl font-bold mb-2 uppercase tracking-widest">RECEIPT GENERATOR</h1>
@@ -1884,7 +1883,15 @@ export default function Home() {
           </div>
           
           <hr className="receipt-divider" />
-          <p className="text-[#999] text-[10px] mt-6 uppercase tracking-wider">
+          <div className="flex justify-center gap-3 mt-6 mb-2">
+            <Link href="/support" className="text-[10px] text-[#999] hover:text-[#FC4C02] uppercase tracking-wider">
+              [SUPPORT]
+            </Link>
+            <Link href="/privacy" className="text-[10px] text-[#999] hover:text-[#FC4C02] uppercase tracking-wider">
+              [PRIVACY]
+            </Link>
+          </div>
+          <p className="text-[#999] text-[10px] uppercase tracking-wider">
             * * * THANK YOU * * *
           </p>
         </div>
@@ -1904,7 +1911,7 @@ export default function Home() {
           >
             {sidebarOpen ? '[−]' : '[+]'}
           </button>
-          <Image src="/Strava_Logo.svg.png" alt="STRAVA" width={70} height={18} style={{ filter: 'grayscale(100%)' }} />
+          <Image src="/Strava_Logo.svg.png" alt="STRAVA" width={70} height={18} />
           <span className="text-[10px] text-[#666] uppercase tracking-wider">/ RECEIPT</span>
         </div>
         <div className="flex items-center gap-3">
@@ -3075,10 +3082,24 @@ export default function Home() {
 
       {/* Footer */}
       <footer className="border-t border-[#DDD] px-4 py-3 text-center" style={{ background: '#FAF9F6' }}>
+        <div className="flex justify-center gap-3 mb-2">
+          <Link href="/about" className="text-[10px] text-[#666] hover:text-[#FC4C02] uppercase tracking-wider">
+            [ABOUT]
+          </Link>
+          <Link href="/features" className="text-[10px] text-[#666] hover:text-[#FC4C02] uppercase tracking-wider">
+            [FEATURES]
+          </Link>
+          <Link href="/support" className="text-[10px] text-[#666] hover:text-[#FC4C02] uppercase tracking-wider">
+            [SUPPORT]
+          </Link>
+          <Link href="/privacy" className="text-[10px] text-[#666] hover:text-[#FC4C02] uppercase tracking-wider">
+            [PRIVACY]
+          </Link>
+        </div>
         <p className="text-[10px] text-[#666] uppercase tracking-wider">
           BUILT WITH LOVE BY{' '}
-          <a 
-            href="https://repete.art" 
+          <a
+            href="https://repete.art"
             target="_blank"
             rel="noopener noreferrer"
             className="text-[#FC4C02] hover:underline"
